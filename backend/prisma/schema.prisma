@@ -1,0 +1,143 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// --- Auth & Core ---
+
+model Company {
+  id        String   @id @default(uuid())
+  name      String
+  createdAt DateTime @default(now())
+
+  // --- NOVOS CAMPOS DE CONFIGURAÇÃO ---
+  currency           String @default("BRL")
+  minStockAlert      Int    @default(5)        // Padrão global para alertas
+  purchaseAlertLimit Float  @default(10000.00) // Alerta se uma compra passar desse valor
+
+  // Relacionamentos
+  users        User[]
+  transactions Transaction[]
+  categories   Category[]
+  skus         Sku[]
+  whatsappLogs WhatsappLog[]
+  auditLogs    AuditLog[]
+}
+
+model User {
+  id           String   @id @default(uuid())
+  name         String
+  email        String   @unique
+  passwordHash String
+  role         String   @default("USER") // "ADMIN" ou "USER"
+  companyId    String
+  company      Company  @relation(fields: [companyId], references: [id])
+  createdAt    DateTime @default(now())
+
+  // Quem fez a movimentação no estoque
+  inventoryMovements InventoryMovement[]
+  auditLogs          AuditLog[]
+}
+
+// --- Financeiro ---
+
+model Category {
+  id        String   @id @default(uuid())
+  name      String
+  // SQLite não suporta array nativo (String[]), então salvaremos as keywords 
+  // separadas por vírgula. Ex: "uber,99,taxi"
+  keywords  String?
+  priority  Int      @default(1) // <--- NOVO CAMPO: Quanto maior, antes ele verifica
+  companyId String
+  company   Company  @relation(fields: [companyId], references: [id])
+  
+  transactions Transaction[]
+}
+
+model Transaction {
+  id          String   @id @default(uuid())
+  type        String   // "INCOME" (Receita) ou "EXPENSE" (Despesa)
+  amount      Float
+  date        DateTime
+  description String
+  
+  categoryId  String?
+  category    Category? @relation(fields: [categoryId], references: [id])
+
+  companyId   String
+  company     Company   @relation(fields: [companyId], references: [id])
+  
+  createdAt   DateTime @default(now())
+}
+
+// --- Estoque (Almoxarifado) ---
+
+model Sku {
+  id           String   @id @default(uuid())
+  code         String   // Código único do produto ex: "LAPIS-HB"
+  name         String
+  quantity     Int      @default(0) // Estoque atual
+  minQuantity  Int      @default(5) // Ponto de alerta
+  costPrice    Float    @default(0) // Novo: Para calcular Capital Empregado
+  sellingPrice Float    @default(0) // Novo: Para calcular Margem estimada
+  
+  companyId    String
+  company      Company  @relation(fields: [companyId], references: [id])
+  
+  movements    InventoryMovement[]
+
+  createdAt    DateTime @default(now()) // <--- ADICIONE ESTA LINHA AQUI!
+
+  @@unique([companyId, code]) // Garante que o código seja único DENTRO da empresa
+}
+
+model InventoryMovement {
+  id        String   @id @default(uuid())
+  type      String   // "IN", "OUT", "ADJUST"
+  quantity  Int
+  notes     String?
+  
+  skuId     String
+  sku       Sku      @relation(fields: [skuId], references: [id])
+
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+
+  createdAt DateTime @default(now())
+}
+
+// --- Extra (Portfolio) ---
+
+model WhatsappLog {
+  id        String   @id @default(uuid())
+  contactName String? // Nome do cliente/fornecedor
+  phone     String
+  message   String
+  status    String   // "SENT", "DELIVERED", "READ", "FAILED"
+  direction String   @default("OUT") // "IN" (cliente falou) ou "OUT" (nós falamos)
+
+  companyId String
+  company   Company  @relation(fields: [companyId], references: [id])
+
+  createdAt DateTime @default(now())
+}
+
+// --- Audit Log ---
+
+model AuditLog {
+  id        String   @id @default(uuid())
+  action    String   // Ex: "DELETE_PRODUCT", "UPDATE_SETTINGS", "LOGIN"
+  details   String?  // Ex: "Produto Caneta removido"
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+  companyId String
+  company   Company  @relation(fields: [companyId], references: [id])
+  createdAt DateTime @default(now())
+}
